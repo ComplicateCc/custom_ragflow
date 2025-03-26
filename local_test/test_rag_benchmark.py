@@ -22,14 +22,10 @@ HOST_ADDRESS = "http://localhost:9380"  # 替换为您的RAGFlow服务地址
 TEST_DATASET_NAME = "客服中台-bge_embedding"  # 替换为您要测试的现有数据集名称
 
 # 测试问题列表
-TEST_QUESTIONS = [
-    "能告诉我重置密码在哪里吗?",
-    "我账号被盗了怎么版?",
-    "小号无法上下物品怎么办?",
-    "我账号登录不上啦",
-    "游戏蓝屏了怎么办?",
-    "怎么解决游戏闪退问题?",
-]
+TEST_QUESTIONS = []
+
+# 测试答案列表
+TEST_ANSWER = []
 
 # 创建结果目录
 RESULTS_DIR = "rag_test_results"
@@ -64,25 +60,35 @@ def test_rag_queries(rag_instance, dataset, questions, documents=None):
     """测试RAG查询并收集结果"""
     results = []
     dataset_ids = [dataset.id]
-    document_ids = [doc.id for doc in documents] if documents else None
+    document_ids = [doc.id for doc in documents] if documents else []
     
     print(f"开始测试 {len(questions)} 个问题...")
     for i, question in enumerate(questions):
         print(f"测试问题 {i+1}/{len(questions)}: {question}")
         
-        # 调用RAG接口获取检索结果
+        # 直接调用HTTP API而不是SDK的retrieve方法
         start_time = time.time()
-        chunks = rag_instance.retrieve(
-            dataset_ids=dataset_ids,
-            document_ids=document_ids,
-            question=question,
-            page=1,
-            page_size=10,
-            similarity_threshold=0.2,
-            vector_similarity_weight=0.7,
-            top_k=1024
-        )
+        response = rag_instance.post('/retrieval', json={
+            "dataset_ids": dataset_ids,
+            "documents": document_ids,
+            "question": question,
+            "page": 1,
+            "page_size": 10,
+            "similarity_threshold": 0.6,
+            "vector_similarity_weight": 0.8,
+            "top_k": 1024,
+            "rerank_id": None,
+            "keyword": False
+        })
         end_time = time.time()
+        
+        response_data = response.json()
+        
+        if response_data.get("code") != 0:
+            print(f"API调用错误: {response_data.get('message', '未知错误')}")
+            chunks = []
+        else:
+            chunks = response_data.get("data", {}).get("chunks", [])
         
         # 收集结果
         query_result = {
@@ -92,15 +98,25 @@ def test_rag_queries(rag_instance, dataset, questions, documents=None):
             "chunks": []
         }
         
+        # 打印一个示例chunk的属性，帮助调试
+        if chunks and len(chunks) > 0:
+            print(f"调试信息 - 第一个Chunk的数据示例:")
+            print(f"  内容: {chunks[0].get('content', '')[:100]}...")
+            print(f"  文档ID: {chunks[0].get('document_id', '')}")
+            print(f"  文档名称: {chunks[0].get('document_keyword', '未知文档')}")
+            print(f"  综合相似度: {chunks[0].get('similarity', 0.0)}")
+            print(f"  向量相似度: {chunks[0].get('vector_similarity', 0.0)}")
+            print(f"  关键词相似度: {chunks[0].get('term_similarity', 0.0)}")
+        
         # 收集检索到的chunks详情
         for chunk in chunks:
             chunk_data = {
-                "content": chunk.content,
-                "document_id": chunk.document_id,
-                "document_name": chunk.document_keyword,
-                "similarity": chunk.similarity,
-                "vector_similarity": chunk.vector_similarity,
-                "term_similarity": chunk.term_similarity,
+                "content": chunk.get("content", ""),
+                "document_id": chunk.get("document_id", ""),
+                "document_name": chunk.get("document_keyword", chunk.get("document_name", "未知文档")),
+                "similarity": chunk.get("similarity", 0.0),
+                "vector_similarity": chunk.get("vector_similarity", 0.0),
+                "term_similarity": chunk.get("term_similarity", 0.0),
             }
             query_result["chunks"].append(chunk_data)
         
