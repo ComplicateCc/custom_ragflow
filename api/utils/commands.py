@@ -22,6 +22,7 @@ from flask import Flask
 from werkzeug.security import generate_password_hash
 
 from api.db.services import UserService
+from api.db.services import TenantService, UserTenantService, TenantLLMService
 
 
 @click.command('reset-password', help='Reset the account password.')
@@ -73,6 +74,39 @@ def reset_email(email, new_email, email_confirm):
     UserService.update_user(user[0].id,user_dict)
     click.echo(click.style('Congratulations!, email has been reset.', fg='green'))
 
+
+@click.command('rollback-registration', help='Rollback user registration.')
+@click.option('--email', prompt=True, help='The email address of the account to rollback')
+def rollback_registration(email):
+    user = UserService.query(email=email)
+    if not user:
+        click.echo(click.style(f'Sorry, the account with email {email} does not exist.', fg='red'))
+        return
+    
+    user_id = user[0].id
+    try:
+        UserService.delete_by_id(user_id)
+    except Exception:
+        pass
+    try:
+        TenantService.delete_by_id(user_id)
+    except Exception:
+        pass
+    try:
+        u = UserTenantService.query(tenant_id=user_id)
+        if u:
+            UserTenantService.delete_by_id(u[0].id)
+    except Exception:
+        pass
+    try:
+        TenantLLM = TenantLLMService.query_model()
+        TenantLLM.delete().where(TenantLLM.tenant_id == user_id).execute()
+    except Exception:
+        pass
+    
+    click.echo(click.style(f'Successfully rolled back registration for {email}', fg='green'))
+
 def register_commands(app: Flask):
     app.cli.add_command(reset_password)
     app.cli.add_command(reset_email)
+    app.cli.add_command(rollback_registration)
